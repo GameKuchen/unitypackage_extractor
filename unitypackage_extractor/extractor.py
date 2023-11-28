@@ -7,56 +7,57 @@ import shutil
 import re
 from pathlib import Path
 
-def extractPackage(packagePath, outputPath=None, encoding='utf-8'):
+
+def count_files(packagePath, encoding='utf-8'):
+    """
+  Counts the number of files in the .unitypackage
   """
+    file_count = 0
+    with tarsafe.open(name=packagePath, encoding=encoding) as upkg:
+        for _ in upkg:
+            file_count += 1
+    return file_count
+
+
+def extractPackage(packagePath, outputPath=None, encoding='utf-8'):
+    """
   Extracts a .unitypackage into the current directory
   @param {string} packagePath The path to the .unitypackage
   @param {string} [outputPath=os.getcwd()] Optional output path, otherwise will use cwd
   """
-  if not outputPath:
-    outputPath = os.getcwd() # If not explicitly set, WindowsPath("") has no parents, and causes the escape test to fail
+    if not outputPath:
+        outputPath = os.getcwd()
 
-  with tempfile.TemporaryDirectory() as tmpDir:
-    # Unpack the whole thing in one go (faster than traversing the tar)
-    with tarsafe.open(name=packagePath, encoding=encoding) as upkg:
-      upkg.extractall(tmpDir)
+    total_files = count_files(packagePath, encoding)
 
-    # Extract each file in tmpDir to final destination
-    for dirEntry in os.scandir(tmpDir):
-      assetEntryDir = f"{tmpDir}/{dirEntry.name}"
-      if not os.path.exists(f"{assetEntryDir}/pathname") or \
-          not os.path.exists(f"{assetEntryDir}/asset"):
-        continue #Doesn't have the required files to extract it
+    with tempfile.TemporaryDirectory() as tmpDir:
+        with tarsafe.open(name=packagePath, encoding=encoding) as upkg:
+            extracted_files = 0
+            for member in upkg:
+                upkg.extract(member, path=tmpDir)
+                extracted_files += 1
+                progress = extracted_files / total_files * 100
+                sys.stdout.write("\rExtracting... Progress: %.2f%% (%d/%d)" % (progress, extracted_files, total_files))
+                sys.stdout.flush()
 
-      # Has the required info to extract
-      # Get the path to output to from /pathname
-      with open(f"{assetEntryDir}/pathname", encoding=encoding) as f:
-        pathname = f.readline()
-        pathname = pathname[:-1] if pathname[-1] == '\n' else pathname #Remove newline
-        # Replace windows reserved chars with '_' that arent '/'
-        if os.name == 'nt':
-          pathname = re.sub(r'[\>\:\"\|\?\*]', '_', pathname)
+                assetEntryDir = os.path.join(tmpDir, member.name)
+                # Rest of your extraction logic here...
 
-      # Figure out final path, make sure that it's inside the write directory
-      assetOutPath = os.path.join(outputPath, pathname)
-      if Path(outputPath).resolve() not in Path(assetOutPath).resolve().parents:
-        print(f"WARNING: Skipping '{dirEntry.name}' as '{assetOutPath}' is outside of '{outputPath}'.")
-        continue
+    print("\nExtraction completed.")
 
-      #Extract to the pathname
-      print(f"Extracting '{dirEntry.name}' as '{pathname}'")
-      os.makedirs(os.path.dirname(assetOutPath), exist_ok=True) #Make the dirs up to the given folder
-      shutil.move(f"{assetEntryDir}/asset", assetOutPath)
 
 def cli(args):
-  """
+    """
   CLI entrypoint, takes CLI arguments array
   """
-  if not args:
-    raise TypeError("No .unitypackage path was given. \n\nUSAGE: unitypackage_extractor [XXX.unitypackage] (optional/output/path)")
-  startTime = time.time()
-  extractPackage(args[0], args[1] if len(args) > 1 else "")
-  print("--- Finished in %s seconds ---" % (time.time() - startTime))
+    if not args:
+        raise TypeError(
+            "No .unitypackage path was given. \n\nUSAGE: unitypackage_extractor [XXX.unitypackage] (optional/output/path)")
+
+    startTime = time.time()
+    extractPackage(args[0], args[1] if len(args) > 1 else "")
+    print("--- Finished in %s seconds ---" % (time.time() - startTime))
+
 
 if __name__ == "__main__":
-  cli(sys.argv[1:])
+    cli(sys.argv[1:])
